@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: schedule-system
+data:
+  master.cnf: |
+    [mysqld]
+    log-bin=mysql-bin
+    server-id=1
+    binlog_format=ROW
+    expire_logs_days=7
+    default_authentication_plugin=mysql_native_password
+    max_connections=1000
+    innodb_buffer_pool_size=1G
+  slave.cnf: |
+    [mysqld]
+    relay-log=mysql-relay-bin
+    read_only=1
+    default_authentication_plugin=mysql_native_password
+    max_connections=1000
+    innodb_buffer_pool_size=1G
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-headless
+  namespace: schedule-system
+spec:
+  clusterIP: None
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-master
+  namespace: schedule-system
+spec:
+  selector:
+    app: mysql
+    statefulset.kubernetes.io/pod-name: mysql-0
+  ports:
+    - port: 3306
+      targetPort: 3306
+      nodePort: 30306
+  type: NodePort
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-slave
+  namespace: schedule-system
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: schedule-system
+spec:
+  serviceName: mysql-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0.28
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              value: "Schedule@123456"
+            - name: MYSQL_REPLICATION_USER
+              value: "repl"
+            - name: MYSQL_REPLICATION_PASSWORD
+              value: "Repl@123456"
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: mysql-config
+              mountPath: /etc/mysql/conf.d
+              readOnly: true
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+      volumes:
+        - name: mysql-config
+          configMap:
+            name: mysql-config
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi

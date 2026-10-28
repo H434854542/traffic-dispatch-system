@@ -1,0 +1,15 @@
+# shell 脚本必须 LF，否则在 Linux/容器里报 bad interpreter
+*.sh text eol=lf
+
+# YAML 统一 LF
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# 文档保持 LF
+*.md text eol=lf
+
+# 二进制不做换行转换
+*.docx binary
+*.pdf binary
+*.png binary
+*.jpg binary

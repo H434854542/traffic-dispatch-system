@@ -1,0 +1,44 @@
+# ---- Go ----
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+vendor/          # 离线镜像构建时另行拷贝，仓库不提交
+go.work
+go.work.sum
+
+# ---- 编译与构建产物 ----
+dist/
+build/
+*.tar.gz
+*.tgz
+*.zip
+
+# ---- 日志与备份 ----
+*.log
+backup/
+/data/backup/
+*.sql.gz
+*.rdb
+
+# ---- IDE / 编辑器 ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+~$*
+*.tmp
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+
+# ---- 临时文件 ----
+folder tree.txt
+tmp/
+temp/

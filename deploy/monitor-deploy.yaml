@@ -1,0 +1,251 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: schedule-system
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager-service:9093"]
+    rule_files:
+      - "/etc/prometheus/rules/*.yml"
+    scrape_configs:
+      - job_name: "kubernetes-nodes"
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+      - job_name: "kubernetes-pods"
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: schedule-system
+data:
+  alert-rules.yml: |
+    groups:
+      - name: 系统告警
+        rules:
+          - alert: 节点宕机
+            expr: up == 0
+            for: 30s
+            labels:
+              severity: 紧急
+            annotations:
+              summary: "节点{{ $labels.instance }}宕机"
+              description: "节点{{ $labels.instance }}已超过30秒无法访问，请立即处理！"
+          - alert: MySQL主从中断
+            expr: mysql_slave_status_slave_io_running == 0 or mysql_slave_status_slave_sql_running == 0
+            for: 30s
+            labels:
+              severity: 紧急
+            annotations:
+              summary: "MySQL主从同步中断"
+              description: "MySQL从库{{ $labels.instance }}同步中断，请立即处理！"
+          - alert: Redis主从切换
+            expr: redis_master_link_status == 0
+            for: 10s
+            labels:
+              severity: 警告
+            annotations:
+              summary: "Redis主从发生切换"
+              description: "Redis实例{{ $labels.instance }}主从关系发生变化，请检查！"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-service
+  namespace: schedule-system
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: 9090
+      nodePort: 30090
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: schedule-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.45.0
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=7d"
+            - "--web.enable-lifecycle"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: prometheus-config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+            - name: prometheus-rules
+              mountPath: /etc/prometheus/rules
+            - name: prometheus-data
+              mountPath: /prometheus
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+      volumes:
+        - name: prometheus-config
+          configMap:
+            name: prometheus-config
+        - name: prometheus-rules
+          configMap:
+            name: prometheus-rules
+        - name: prometheus-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: schedule-system
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['alertname']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'dingtalk-webhook'
+    receivers:
+      - name: 'dingtalk-webhook'
+        webhook_configs:
+          - url: 'http://localhost:8080'   # 替换为实际钉钉机器人 Webhook 地址
+            send_resolved: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-service
+  namespace: schedule-system
+spec:
+  selector:
+    app: alertmanager
+  ports:
+    - port: 9093
+      targetPort: 9093
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: schedule-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.25.0
+          args:
+            - "--config.file=/etc/alertmanager/alertmanager.yml"
+          ports:
+            - containerPort: 9093
+          volumeMounts:
+            - name: alertmanager-config
+              mountPath: /etc/alertmanager/alertmanager.yml
+              subPath: alertmanager.yml
+      volumes:
+        - name: alertmanager-config
+          configMap:
+            name: alertmanager-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-service
+  namespace: schedule-system
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30300
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: schedule-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.0.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: "Grafana@123456"
+          volumeMounts:
+            - name: grafana-data
+              mountPath: /var/lib/grafana
+          resources:
+            limits:
+              cpu: 500m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 512Mi
+      volumes:
+        - name: grafana-data
+          emptyDir: {}

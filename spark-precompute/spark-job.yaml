@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spark-precompute-job
+  namespace: schedule-system
+spec:
+  template:
+    spec:
+      nodeName: k3s-node1         # 固定到 Master 节点
+      containers:
+        - name: spark-runner
+          image: maven:3.8.6-openjdk-8
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - >
+              java -cp "$(find /root/.m2 -name 'scala-library-2.12*.jar' | head -1):/app/route-precompute-1.0-SNAPSHOT-jar-with-dependencies.jar" RoutePreCompute
+          volumeMounts:
+            - name: m2-repo
+              mountPath: /root/.m2
+            - name: app-jar
+              mountPath: /app
+      volumes:
+        - name: m2-repo
+          hostPath:
+            path: /root/.m2
+        - name: app-jar
+          hostPath:
+            path: /root/spark-precompute/target
+      restartPolicy: Never

@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schedule-service
+  namespace: schedule-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: schedule-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        app: schedule-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: schedule-service
+          image: schedule-service:v5.0      # 离线构建的镜像（哨兵连接版）
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          resources:
+            limits:
+              cpu: "1"
+              memory: "128Mi"
+            requests:
+              cpu: "500m"
+              memory: "32Mi"
+      # 拓扑分布：两个副本尽量分散到不同节点，避免单点集中
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: schedule-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-schedule-service
+  namespace: schedule-system
+spec:
+  selector:
+    app: schedule-service
+  ports:
+    - port: 8080
+      targetPort: 8080

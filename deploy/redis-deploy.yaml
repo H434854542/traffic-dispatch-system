@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: schedule-system
+data:
+  redis.conf: |
+    bind 0.0.0.0
+    port 6379
+    daemonize no
+    requirepass Redis@123456
+    masterauth Redis@123456
+    appendonly yes
+    rdbcompression yes
+    save 900 1
+    save 300 10
+    save 60 10000
+  sentinel.conf: |
+    port 26379
+    daemonize no
+    sentinel monitor redis-master redis-0.redis-headless 6379 2
+    sentinel auth-pass redis-master Redis@123456
+    sentinel down-after-milliseconds redis-master 3000
+    sentinel failover-timeout redis-master 10000
+    sentinel parallel-syncs redis-master 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: schedule-system
+spec:
+  clusterIP: None
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+    - name: sentinel
+      port: 26379
+      targetPort: 26379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-sentinel
+  namespace: schedule-system
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 26379
+      targetPort: 26379
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: schedule-system
+spec:
+  serviceName: redis-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.0.15
+          command:
+            - sh
+            - -c
+            - "cp /etc/redis/redis.conf /data/redis.conf && redis-server /data/redis.conf"
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+            - name: redis-config
+              mountPath: /etc/redis
+          resources:
+            limits:
+              cpu: 500m
+              memory: 1Gi
+            requests:
+              cpu: 200m
+              memory: 512Mi
+        - name: sentinel
+          image: redis:7.0.15
+          command:
+            - sh
+            - -c
+            - "cp /etc/redis/sentinel.conf /data/sentinel.conf && redis-sentinel /data/sentinel.conf"
+          ports:
+            - containerPort: 26379
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+            - name: redis-config
+              mountPath: /etc/redis
+          resources:
+            limits:
+              cpu: 200m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: redis-config
+          configMap:
+            name: redis-config
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
